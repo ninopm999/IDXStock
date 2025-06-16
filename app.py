@@ -1,3 +1,6 @@
+# Generate a new app.py that filters only stocks with available historical data from investpy
+
+filtered_app_code = """
 import streamlit as st
 import investpy
 import numpy as np
@@ -15,19 +18,37 @@ def create_dataset(dataset, time_step=1):
         dataY.append(dataset[i + time_step, 0])
     return np.array(dataX), np.array(dataY)
 
+@st.cache_data
+def get_valid_stocks_with_history():
+    valid_stocks = []
+    stock_df = investpy.get_stocks(country='indonesia')
+
+    for _, row in stock_df.iterrows():
+        try:
+            investpy.get_stock_historical_data(
+                stock=row['name'],
+                country='indonesia',
+                from_date='01/01/2022',
+                to_date='02/01/2022'
+            )
+            valid_stocks.append((row['name'], row['symbol']))
+        except:
+            continue
+
+    return pd.DataFrame(valid_stocks, columns=["name", "symbol"])
+
 def run_stock_predictor_app():
     st.set_page_config(page_title="IDX Stock Price Predictor", layout="wide")
-    st.title("🇮🇩 IDX Stock Price Predictor (via investpy)")
+    st.title("🇮🇩 IDX Stock Price Predictor (via investpy with verified symbols)")
 
     st.sidebar.header("User Input")
 
-    try:
-        stock_df = investpy.get_stocks(country='indonesia')
-    except Exception as e:
-        st.error(f"Gagal ambil data saham: {e}")
+    stock_df = get_valid_stocks_with_history()
+
+    if stock_df.empty:
+        st.error("Tidak ada saham valid dengan data historis ditemukan.")
         return
 
-    # Mapping aman langsung dari DataFrame
     stock_display_map = {
         f"{row['name']} ({row['symbol']})": row
         for _, row in stock_df.iterrows()
@@ -128,3 +149,11 @@ def run_stock_predictor_app():
 
 if __name__ == "__main__":
     run_stock_predictor_app()
+"""
+
+# Simpan sebagai file
+filtered_app_path = "/mnt/data/app_with_verified_stocks.py"
+with open(filtered_app_path, "w") as f:
+    f.write(filtered_app_code)
+
+filtered_app_path
