@@ -1,6 +1,3 @@
-# Generate a new app.py that filters only stocks with available historical data from investpy
-
-filtered_app_code = """
 import streamlit as st
 import investpy
 import numpy as np
@@ -149,11 +146,3 @@ def run_stock_predictor_app():
 
 if __name__ == "__main__":
     run_stock_predictor_app()
-"""
-
-# Simpan sebagai file
-filtered_app_path = "/mnt/data/app_with_verified_stocks.py"
-with open(filtered_app_path, "w") as f:
-    f.write(filtered_app_code)
-
-filtered_app_path
