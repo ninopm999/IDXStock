@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -98,10 +98,19 @@ def run_stock_predictor_app():
     
     ticker = st.sidebar.text_input("Enter Stock Ticker:", "BBCA.JK").upper()
     start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
-    end_date = st.sidebar.date_input("End Date", datetime.now())
+    
+    # --- FIX: Default End Date to yesterday and add validation ---
+    yesterday = datetime.now() - timedelta(days=1)
+    end_date = st.sidebar.date_input("End Date", yesterday)
+    
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
+        # --- FIX: Validate that the end date is not in the future ---
+        if end_date.date() >= datetime.now().date():
+            st.error("Tanggal Akhir ('End Date') tidak boleh hari ini atau di masa depan. Silakan pilih tanggal kemarin atau sebelumnya.")
+            return
+
         if api_key == "YOUR_API_KEY_HERE" or not api_key:
             st.error("Harap masukkan API Key Finnhub Anda di sidebar.")
             return
