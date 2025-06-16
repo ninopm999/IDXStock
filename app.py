@@ -27,7 +27,11 @@ def run_stock_predictor_app():
         st.error(f"Gagal ambil data saham: {e}")
         return
 
-    stock_display_map = {f"{row['name']} ({row['symbol']})": row for _, row in stock_df.iterrows()}
+    # Mapping aman langsung dari DataFrame
+    stock_display_map = {
+        f"{row['name']} ({row['symbol']})": row
+        for _, row in stock_df.iterrows()
+    }
     stock_display_list = sorted(stock_display_map.keys())
 
     selected_display = st.sidebar.selectbox("Pilih saham:", stock_display_list)
