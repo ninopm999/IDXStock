@@ -1,13 +1,64 @@
 import streamlit as st
-import yfinance as yf
 import numpy as np
 import pandas as pd
+import requests
+import time
+from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import plotly.graph_objects as go
 
+def fetch_finnhub_data(ticker, api_key, start_date, end_date):
+    """
+    Fetches historical stock data from Finnhub API.
+    """
+    # Convert dates to Unix timestamps
+    start_timestamp = int(time.mktime(start_date.timetuple()))
+    end_timestamp = int(time.mktime(end_date.timetuple()))
+
+    # Finnhub API URL
+    url = 'https://finnhub.io/api/v1/stock/candle'
+    
+    params = {
+        'symbol': ticker,
+        'resolution': 'D',
+        'from': start_timestamp,
+        'to': end_timestamp,
+        'token': api_key
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
+        data = response.json()
+        
+        # Check if Finnhub returned an empty or error response
+        if data.get('s') == 'no_data' or not data.get('c'):
+            return None
+
+        # Convert to Pandas DataFrame
+        df = pd.DataFrame(data)
+        df['Date'] = pd.to_datetime(df['t'], unit='s')
+        df.set_index('Date', inplace=True)
+        
+        # Rename columns to be compatible with the rest of the app
+        df.rename(columns={'c': 'Close', 'h': 'High', 'l': 'Low', 'o': 'Open', 'v': 'Volume'}, inplace=True)
+        
+        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error while fetching data: {e}")
+        return None
+    except Exception as e:
+        st.error(f"An error occurred while processing data from Finnhub: {e}")
+        return None
+
+
 def create_dataset(dataset, time_step=1):
+    """
+    Creates a dataset for the LSTM model.
+    """
     dataX, dataY = [], []
     for i in range(len(dataset) - time_step - 1):
         a = dataset[i:(i + time_step), 0]
@@ -16,107 +67,143 @@ def create_dataset(dataset, time_step=1):
     return np.array(dataX), np.array(dataY)
 
 def run_stock_predictor_app():
+    """
+    The main function to run the Streamlit stock predictor app.
+    """
     st.set_page_config(page_title="IDX Stock Price Predictor", layout="wide")
-    st.title("🇮🇩 IDX Stock Price Predictor (Yahoo Finance)")
 
-    st.sidebar.header("User Input")
-
-    st.sidebar.info("""
-    Masukkan kode saham IDX yang berakhiran `.JK`.
-    **Contoh:**
-    - `BBCA.JK`
-    - `ACES.JK`
-    - `ABMM.JK`
-    - `TLKM.JK`
+    st.title("🇮🇩 IDX Stock Price Predictor (via Finnhub API)")
+    st.markdown("""
+    Aplikasi ini menggunakan API resmi dari **Finnhub** dan model *Long Short-Term Memory* (LSTM) 
+    untuk memprediksi harga saham di Bursa Efek Indonesia (IDX).
     """)
 
-    ticker = st.sidebar.text_input("Kode Saham IDX:", "BBCA.JK").upper()
-    start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
-    end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
+    # --- User Input ---
+    st.sidebar.header("User Input")
+    
+    st.sidebar.info(
+        "**Penting:** Dapatkan API Key gratis Anda dari [Finnhub Dashboard](https://finnhub.io/dashboard) "
+        "untuk menggunakan aplikasi ini."
+    )
+    
+    api_key = st.sidebar.text_input("Enter Your Finnhub API Key", type="password", value="YOUR_API_KEY_HERE")
+    
+    st.sidebar.markdown(
+        "**Contoh Kode Saham (harus diakhiri `.JK`):**\n\n"
+        "- `BBCA.JK` (BCA)\n"
+        "- `TLKM.JK` (Telkom Indonesia)\n"
+        "- `GOTO.JK` (GoTo Gojek Tokopedia)\n"
+        "- `ASII.JK` (Astra International)"
+    )
+    
+    ticker = st.sidebar.text_input("Enter Stock Ticker:", "BBCA.JK").upper()
+    start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
+    end_date = st.sidebar.date_input("End Date", datetime.now())
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
-        if not ticker.endswith('.JK'):
-            st.error("❌ Kode saham harus diakhiri dengan `.JK` (contoh: `BBCA.JK`).")
+        if api_key == "YOUR_API_KEY_HERE" or not api_key:
+            st.error("Harap masukkan API Key Finnhub Anda di sidebar.")
             return
 
-        with st.spinner(f"Mengambil data untuk {ticker}..."):
-            try:
-                data = yf.download(ticker, start=start_date, end=end_date)
-                if data.empty:
-                    st.error("❌ Data tidak ditemukan. Coba periksa kode saham dan rentang tanggal.")
-                    return
+        with st.spinner(f"Fetching data for {ticker} and training model..."):
+            
+            data = fetch_finnhub_data(ticker, api_key, start_date, end_date)
+            
+            if data is None or data.empty:
+                st.error(f"Tidak ada data yang ditemukan untuk '{ticker}'. Kemungkinan penyebab:\n\n"
+                         "1. **API Key tidak valid.**\n"
+                         "2. **Kode saham salah.**\n"
+                         "3. **Tidak ada data pada rentang tanggal yang dipilih.**\n\n"
+                         "Mohon periksa kembali input Anda.")
+                return
 
-                st.subheader(f"Data Historis: {ticker}")
-                st.write(data)
+            st.subheader(f"Historical Data for {ticker}")
+            st.write(data)
 
-                close_prices = data['Close'].values.reshape(-1, 1)
-                scaler = MinMaxScaler(feature_range=(0, 1))
-                scaled_prices = scaler.fit_transform(close_prices)
+            # --- Data Preprocessing ---
+            close_prices = data['Close'].values.reshape(-1, 1)
+            scaler = MinMaxScaler(feature_range=(0, 1))
+            scaled_prices = scaler.fit_transform(close_prices)
 
-                training_size = int(len(scaled_prices) * 0.8)
-                train_data = scaled_prices[:training_size]
-                test_data = scaled_prices[training_size:]
+            training_size = int(len(scaled_prices) * 0.8)
+            train_data, test_data = scaled_prices[0:training_size, :], scaled_prices[training_size:len(scaled_prices), :1]
 
-                time_step = 100
-                X_train, y_train = create_dataset(train_data, time_step)
-                X_test, y_test = create_dataset(test_data, time_step)
+            time_step = 100
+            X_train, y_train = create_dataset(train_data, time_step)
+            X_test, y_test = create_dataset(test_data, time_step)
 
-                if len(X_train) == 0 or len(X_test) == 0:
-                    st.warning("Tidak cukup data. Gunakan rentang tanggal lebih panjang.")
-                    return
+            if len(X_train) == 0 or len(X_test) == 0:
+                st.warning("Data tidak cukup untuk melatih model. Harap pilih rentang tanggal yang lebih panjang (misalnya, beberapa tahun).")
+                return
 
-                X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-                X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
+            X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
+            X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
-                model = Sequential([
-                    LSTM(50, return_sequences=True, input_shape=(time_step, 1)),
-                    Dropout(0.2),
-                    LSTM(50, return_sequences=True),
-                    Dropout(0.2),
-                    LSTM(50),
-                    Dropout(0.2),
-                    Dense(1)
-                ])
-                model.compile(optimizer='adam', loss='mean_squared_error')
-                model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=64, verbose=0)
+            # --- LSTM Model ---
+            model = Sequential([
+                LSTM(50, return_sequences=True, input_shape=(time_step, 1)), Dropout(0.2),
+                LSTM(50, return_sequences=True), Dropout(0.2),
+                LSTM(50), Dropout(0.2),
+                Dense(1)
+            ])
+            model.compile(optimizer='adam', loss='mean_squared_error')
+            model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=64, verbose=0)
 
-                train_predict = scaler.inverse_transform(model.predict(X_train))
-                test_predict = scaler.inverse_transform(model.predict(X_test))
+            # --- Predictions ---
+            train_predict = model.predict(X_train)
+            test_predict = model.predict(X_test)
+            train_predict = scaler.inverse_transform(train_predict)
+            test_predict = scaler.inverse_transform(test_predict)
 
-                # Future prediction
-                x_input = test_data[-time_step:].reshape(1, -1)
-                temp_input = list(x_input[0])
-                lst_output = []
-
-                for _ in range(30):
-                    x_input = np.array(temp_input[-time_step:]).reshape(1, time_step, 1)
+            # --- Future Predictions (30 days) ---
+            x_input = test_data[len(test_data) - time_step:].reshape(1, -1)
+            temp_input = list(x_input[0])
+            lst_output = []
+            n_steps = time_step
+            i = 0
+            while(i < 30):
+                if(len(temp_input) > time_step):
+                    x_input = np.array(temp_input[1:])
+                    x_input = x_input.reshape((1, n_steps, 1))
                     yhat = model.predict(x_input, verbose=0)
-                    temp_input.append(yhat[0][0])
-                    lst_output.append(yhat[0][0])
+                    temp_input.extend(yhat[0].tolist())
+                    temp_input = temp_input[1:]
+                    lst_output.extend(yhat.tolist())
+                    i=i+1
+                else:
+                    x_input = np.array(temp_input).reshape((1, n_steps,1))
+                    yhat = model.predict(x_input,verbose=0)
+                    temp_input.extend(yhat[0].tolist())
+                    lst_output.extend(yhat.tolist())
+                    i=i+1
+            
+            future_predictions = scaler.inverse_transform(lst_output)
 
-                future_predictions = scaler.inverse_transform(np.array(lst_output).reshape(-1, 1))
+            # --- Visualization ---
+            st.subheader("Hasil Prediksi Harga Saham")
+            fig = go.Figure()
 
-                st.subheader("Prediksi Harga Saham")
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Harga Aktual'))
+            fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Harga Aktual'))
 
-                train_plot = np.empty_like(scaled_prices)
-                train_plot[:, :] = np.nan
-                train_plot[time_step:len(train_predict)+time_step] = train_predict
-                fig.add_trace(go.Scatter(x=data.index, y=train_plot.flatten(), name='Prediksi Latih'))
+            train_predict_plot = np.empty_like(scaled_prices)
+            train_predict_plot[:, :] = np.nan
+            train_predict_plot[time_step:len(train_predict) + time_step, :] = train_predict
+            fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Prediksi Training'))
 
-                test_index = data.index[len(train_data) + time_step + 1 : len(data) - 1]
-                fig.add_trace(go.Scatter(x=test_index, y=test_predict.flatten(), name='Prediksi Uji'))
+            test_predict_index = data.index[len(train_data) + time_step + 1 : len(data) -1]
+            fig.add_trace(go.Scatter(x=test_predict_index, y=test_predict.flatten(), mode='lines', name='Prediksi Test'))
+            
+            future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
+            fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Prediksi 30 Hari ke Depan'))
 
-                future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
-                fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), name='Prediksi 30 Hari ke Depan'))
-
-                fig.update_layout(title=f"Prediksi Harga Saham {ticker}", xaxis_title="Tanggal", yaxis_title="Harga (IDR)", template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-
-            except Exception as e:
-                st.error(f"Terjadi kesalahan: {e}")
+            fig.update_layout(
+                title_text=f"Prediksi Harga Saham {ticker}",
+                xaxis_title="Tanggal", yaxis_title="Harga Saham (IDR)",
+                template="plotly_dark",
+                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     run_stock_predictor_app()
