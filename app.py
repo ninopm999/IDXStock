@@ -21,19 +21,18 @@ def run_stock_predictor_app():
 
     st.sidebar.header("User Input")
 
-    # Ambil semua saham di Indonesia
     try:
         stock_df = investpy.get_stocks(country='indonesia')
     except Exception as e:
         st.error(f"Gagal ambil data saham: {e}")
         return
 
-    # Buat display name dan mapping
-    stock_map = {f"{row['name']} ({row['symbol']})": row['name'] for _, row in stock_df.iterrows()}
-    stock_display_list = sorted(stock_map.keys())
+    stock_display_map = {f"{row['name']} ({row['symbol']})": row for _, row in stock_df.iterrows()}
+    stock_display_list = sorted(stock_display_map.keys())
 
     selected_display = st.sidebar.selectbox("Pilih saham:", stock_display_list)
-    selected_stock_name = stock_map[selected_display]
+    selected_stock_row = stock_display_map[selected_display]
+    selected_stock_name = selected_stock_row['name']
 
     start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
     end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
@@ -56,7 +55,6 @@ def run_stock_predictor_app():
                 st.subheader(f"Historical Data: {selected_stock_name}")
                 st.write(data)
 
-                # --- Preprocessing ---
                 close_prices = data['Close'].values.reshape(-1, 1)
                 scaler = MinMaxScaler(feature_range=(0, 1))
                 scaled_prices = scaler.fit_transform(close_prices)
@@ -76,7 +74,6 @@ def run_stock_predictor_app():
                 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
                 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
-                # --- Model ---
                 model = Sequential([
                     LSTM(50, return_sequences=True, input_shape=(time_step, 1)),
                     Dropout(0.2),
@@ -92,7 +89,6 @@ def run_stock_predictor_app():
                 train_predict = scaler.inverse_transform(model.predict(X_train))
                 test_predict = scaler.inverse_transform(model.predict(X_test))
 
-                # --- Future Prediction ---
                 x_input = test_data[-time_step:].reshape(1, -1)
                 temp_input = list(x_input[0])
                 lst_output = []
@@ -105,10 +101,8 @@ def run_stock_predictor_app():
 
                 future_predictions = scaler.inverse_transform(np.array(lst_output).reshape(-1, 1))
 
-                # --- Plotting ---
                 st.subheader("Prediction Results")
                 fig = go.Figure()
-
                 fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Actual Price'))
 
                 train_plot = np.empty_like(scaled_prices)
