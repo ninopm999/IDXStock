@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -97,17 +97,16 @@ def run_stock_predictor_app():
     )
     
     ticker = st.sidebar.text_input("Enter Stock Ticker:", "BBCA.JK").upper()
-    start_date = st.sidebar.date_input("Start Date", datetime(2020, 1, 1))
+    start_date = st.sidebar.date_input("Start Date", date(2020, 1, 1))
     
-    # --- FIX: Default End Date to yesterday and add validation ---
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = date.today() - timedelta(days=1)
     end_date = st.sidebar.date_input("End Date", yesterday)
     
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
         # --- FIX: Validate that the end date is not in the future ---
-        if end_date.date() >= datetime.now().date():
+        if end_date >= date.today():
             st.error("Tanggal Akhir ('End Date') tidak boleh hari ini atau di masa depan. Silakan pilih tanggal kemarin atau sebelumnya.")
             return
 
@@ -193,16 +192,23 @@ def run_stock_predictor_app():
             st.subheader("Hasil Prediksi Harga Saham")
             fig = go.Figure()
 
+            # Plot Actual Price
             fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Harga Aktual'))
 
+            # Plot Training Predictions
             train_predict_plot = np.empty_like(scaled_prices)
             train_predict_plot[:, :] = np.nan
             train_predict_plot[time_step:len(train_predict) + time_step, :] = train_predict
             fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Prediksi Training'))
 
-            test_predict_index = data.index[len(train_data) + time_step + 1 : len(data) -1]
-            fig.add_trace(go.Scatter(x=test_predict_index, y=test_predict.flatten(), mode='lines', name='Prediksi Test'))
+            # Plot Test Predictions (More Robust Method)
+            test_predict_plot = np.empty_like(scaled_prices)
+            test_predict_plot[:, :] = np.nan
+            test_start_index = len(train_predict) + (time_step*2) + 1
+            test_predict_plot[test_start_index:test_start_index + len(test_predict), :] = test_predict
+            fig.add_trace(go.Scatter(x=data.index, y=test_predict_plot.flatten(), mode='lines', name='Prediksi Test'))
             
+            # Plot Future Predictions
             future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
             fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Prediksi 30 Hari ke Depan'))
 
