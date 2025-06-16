@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+import investpy
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -17,48 +17,35 @@ def create_dataset(dataset, time_step=1):
 
 def run_stock_predictor_app():
     st.set_page_config(page_title="IDX Stock Price Predictor", layout="wide")
-    st.title("🇮🇩 IDX Stock Price Predictor")
+    st.title("🇮🇩 IDX Stock Price Predictor (via investpy)")
     st.markdown("""
-    This application uses a Long Short-Term Memory (LSTM) neural network to predict the stock price of a chosen company
-    on the Indonesia Stock Exchange (IDX).
+    This application uses an LSTM neural network to predict stock prices on the Indonesia Stock Exchange (IDX), powered by data from [Investing.com](https://www.investing.com).
     """)
 
-    # --- User Input ---
     st.sidebar.header("User Input")
-    st.sidebar.info("""
-    Enter an official IDX ticker symbol. **It must end with `.JK`**.
+    stock_list = investpy.get_stocks(country='indonesia')
+    stock_names = stock_list['name'].sort_values().tolist()
 
-    **Examples:**
-    - `BBCA.JK` (BCA)
-    - `TLKM.JK` (Telkom Indonesia)
-    - `GOTO.JK` (GoTo Gojek Tokopedia)
-    - `ASII.JK` (Astra International)
-    """)
-
-    ticker = st.sidebar.text_input("Enter Stock Ticker:", "BBCA.JK").upper()
+    selected_stock = st.sidebar.selectbox("Select a stock:", stock_names, index=stock_names.index("Bank Central Asia"))
     start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
     end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
-        if not ticker.endswith('.JK'):
-            st.error("Invalid Ticker. It must end with `.JK`.")
-            return
-
-        with st.spinner(f"Fetching data and training model for {ticker}..."):
+        with st.spinner(f"Fetching data and training model for {selected_stock}..."):
             try:
-                # --- Robust Download ---
-                data = yf.download(ticker, start=start_date, end=end_date)
+                data = investpy.get_stock_historical_data(
+                    stock=selected_stock,
+                    country='indonesia',
+                    from_date=start_date.strftime('%d/%m/%Y'),
+                    to_date=end_date.strftime('%d/%m/%Y')
+                )
 
                 if data.empty:
-                    st.error(f"No data found for '{ticker}'. This could be due to:\n\n"
-                             "1. Incorrect ticker.\n"
-                             "2. Company not listed in that time range.\n"
-                             "3. Temporary issue with Yahoo Finance.\n\n"
-                             "Please check the ticker or try again later.")
+                    st.error("No data found. Please adjust the date range or try another stock.")
                     return
 
-                st.subheader(f"Historical Data for {ticker}")
+                st.subheader(f"Historical Data for {selected_stock}")
                 st.write(data)
 
                 # --- Preprocessing ---
@@ -67,15 +54,15 @@ def run_stock_predictor_app():
                 scaled_prices = scaler.fit_transform(close_prices)
 
                 training_size = int(len(scaled_prices) * 0.8)
-                train_data = scaled_prices[0:training_size, :]
-                test_data = scaled_prices[training_size:, :1]
+                train_data = scaled_prices[0:training_size]
+                test_data = scaled_prices[training_size:]
 
                 time_step = 100
                 X_train, y_train = create_dataset(train_data, time_step)
                 X_test, y_test = create_dataset(test_data, time_step)
 
                 if len(X_train) == 0 or len(X_test) == 0:
-                    st.warning("Not enough data to train. Select a wider date range.")
+                    st.warning("Not enough data. Expand the date range.")
                     return
 
                 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
@@ -95,20 +82,16 @@ def run_stock_predictor_app():
                 model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=64, verbose=0)
 
                 # --- Predictions ---
-                train_predict = model.predict(X_train)
-                test_predict = model.predict(X_test)
+                train_predict = scaler.inverse_transform(model.predict(X_train))
+                test_predict = scaler.inverse_transform(model.predict(X_test))
 
-                train_predict = scaler.inverse_transform(train_predict)
-                test_predict = scaler.inverse_transform(test_predict)
-
-                # --- Future Prediction ---
+                # --- Future Forecast ---
                 x_input = test_data[-time_step:].reshape(1, -1)
                 temp_input = list(x_input[0])
                 lst_output = []
 
                 for i in range(30):
-                    x_input = np.array(temp_input[-time_step:])
-                    x_input = x_input.reshape((1, time_step, 1))
+                    x_input = np.array(temp_input[-time_step:]).reshape(1, time_step, 1)
                     yhat = model.predict(x_input, verbose=0)
                     temp_input.append(yhat[0][0])
                     lst_output.append(yhat[0][0])
@@ -123,27 +106,20 @@ def run_stock_predictor_app():
 
                 train_plot = np.empty_like(scaled_prices)
                 train_plot[:, :] = np.nan
-                train_plot[time_step:len(train_predict) + time_step, :] = train_predict
-                fig.add_trace(go.Scatter(x=data.index, y=train_plot.flatten(), mode='lines', name='Training Prediction'))
+                train_plot[time_step:len(train_predict)+time_step] = train_predict
+                fig.add_trace(go.Scatter(x=data.index, y=train_plot.flatten(), mode='lines', name='Train Prediction'))
 
-                test_start_idx = len(train_data) + time_step + 1
-                test_index = data.index[test_start_idx:test_start_idx + len(test_predict)]
+                test_index = data.index[len(train_data) + time_step + 1 : len(data) - 1]
                 fig.add_trace(go.Scatter(x=test_index, y=test_predict.flatten(), mode='lines', name='Test Prediction'))
 
                 future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
-                fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Future Prediction (30 Days)'))
+                fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Future Prediction'))
 
-                fig.update_layout(
-                    title=f"{ticker} Stock Price Forecast",
-                    xaxis_title="Date",
-                    yaxis_title="Price (IDR)",
-                    template="plotly_dark"
-                )
+                fig.update_layout(title=f"{selected_stock} Price Forecast", xaxis_title="Date", yaxis_title="Price (IDR)", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
 
             except Exception as e:
-                st.error(f"❌ Error: {e}")
-                st.info("Try again later or check ticker/date.")
+                st.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     run_stock_predictor_app()
