@@ -32,7 +32,7 @@ def run_stock_predictor_app():
     """
     st.set_page_config(page_title="IDX Stock Price Predictor", layout="wide")
 
-    st.title("IDX Stock Price Predictor")
+    st.title("🇮🇩 IDX Stock Price Predictor")
     st.markdown("""
     This application uses a Long Short-Term Memory (LSTM) neural network to predict the stock price of a chosen company
     on the Indonesia Stock Exchange (IDX).
@@ -40,18 +40,41 @@ def run_stock_predictor_app():
 
     # --- User Input ---
     st.sidebar.header("User Input")
-    ticker = st.sidebar.text_input("Enter Stock Ticker (e.g., BBCA.JK):", "BBCA.JK").upper()
+    
+    # Add informational box for ticker format
+    st.sidebar.info(
+        "Enter an official IDX ticker symbol. "
+        "**It must end with `.JK`**.\n\n"
+        "**Examples:**\n\n"
+        "- `BBCA.JK` (BCA)\n"
+        "- `TLKM.JK` (Telkom Indonesia)\n"
+        "- `GOTO.JK` (GoTo Gojek Tokopedia)\n"
+        "- `ASII.JK` (Astra International)"
+    )
+    
+    ticker = st.sidebar.text_input("Enter Stock Ticker:", "BBCA.JK").upper()
     start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
     end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
+        # Pre-emptive check for correct ticker format
+        if not ticker.endswith('.JK'):
+            st.error("Invalid Ticker. The ticker symbol must end with '.JK' for the Indonesia Stock Exchange.")
+            return
+
         with st.spinner(f"Fetching data and training model for {ticker}..."):
             try:
                 # --- Data Fetching ---
                 data = yf.download(ticker, start=start_date, end=end_date)
+                
+                # Check if data is empty AFTER download attempt
                 if data.empty:
-                    st.error("No data found for the given ticker. Please check the ticker symbol.")
+                    st.error(f"No data found for '{ticker}'. This could be due to a few reasons:\n\n"
+                             "1. The ticker symbol does not exist.\n"
+                             "2. The company was not listed during the selected date range.\n"
+                             "3. There is a temporary issue with the data provider (Yahoo Finance).\n\n"
+                             "Please double-check the ticker symbol and the date range.")
                     return
 
                 st.subheader(f"Historical Data for {ticker}")
@@ -63,13 +86,13 @@ def run_stock_predictor_app():
                 scaled_prices = scaler.fit_transform(close_prices)
 
                 training_size = int(len(scaled_prices) * 0.8)
-                test_size = len(scaled_prices) - training_size
                 train_data, test_data = scaled_prices[0:training_size, :], scaled_prices[training_size:len(scaled_prices), :1]
 
                 time_step = 100
                 X_train, y_train = create_dataset(train_data, time_step)
                 X_test, y_test = create_dataset(test_data, time_step)
 
+                # Reshape data for LSTM [samples, time_steps, features]
                 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
                 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
@@ -90,16 +113,18 @@ def run_stock_predictor_app():
                 train_predict = model.predict(X_train)
                 test_predict = model.predict(X_test)
 
+                # Invert predictions back to original scale
                 train_predict = scaler.inverse_transform(train_predict)
                 test_predict = scaler.inverse_transform(test_predict)
 
-                # --- Future Predictions ---
-                temp_input = list(test_data[len(test_data) - time_step:].flatten())
+                # --- Future Predictions (30 days) ---
+                x_input = test_data[len(test_data) - time_step:].reshape(1, -1)
+                temp_input = list(x_input[0])
                 lst_output = []
                 n_steps = time_step
                 i = 0
-                while i < 30:  # Predict for the next 30 days
-                    if len(temp_input) > 100:
+                while(i < 30):
+                    if(len(temp_input) > time_step):
                         x_input = np.array(temp_input[1:])
                         x_input = x_input.reshape(1, -1)
                         x_input = x_input.reshape((1, n_steps, 1))
@@ -107,51 +132,50 @@ def run_stock_predictor_app():
                         temp_input.extend(yhat[0].tolist())
                         temp_input = temp_input[1:]
                         lst_output.extend(yhat.tolist())
-                        i += 1
+                        i=i+1
                     else:
-                        x_input = np.array(temp_input).reshape((1, n_steps, 1))
-                        yhat = model.predict(x_input, verbose=0)
+                        x_input = x_input.reshape((1, n_steps,1))
+                        yhat = model.predict(x_input,verbose=0)
                         temp_input.extend(yhat[0].tolist())
                         lst_output.extend(yhat.tolist())
-                        i += 1
+                        i=i+1
 
                 future_predictions = scaler.inverse_transform(lst_output)
 
                 # --- Visualization ---
-                st.subheader("Stock Price Prediction")
-
+                st.subheader("Stock Price Prediction Results")
                 fig = go.Figure()
 
-                # Original Data
-                fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Original Close Price'))
+                # Original Closing Price
+                fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Actual Price'))
 
                 # Training Predictions
                 train_predict_plot = np.empty_like(scaled_prices)
                 train_predict_plot[:, :] = np.nan
                 train_predict_plot[time_step:len(train_predict) + time_step, :] = train_predict
-                fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Training Predictions'))
+                fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Training Prediction'))
 
                 # Test Predictions
-                test_predict_plot = np.empty_like(scaled_prices)
-                test_predict_plot[:, :] = np.nan
-                test_predict_plot[len(train_predict) + (time_step * 2) + 1:len(scaled_prices) - 1, :] = test_predict
-                fig.add_trace(go.Scatter(x=data.index, y=test_predict_plot.flatten(), mode='lines', name='Test Predictions'))
+                test_predict_index = data.index[len(train_data) + time_step + 1 : len(data) -1]
+                fig.add_trace(go.Scatter(x=test_predict_index, y=test_predict.flatten(), mode='lines', name='Test Prediction'))
                 
                 # Future Predictions
-                future_dates = pd.to_datetime(data.index[-1]) + pd.to_timedelta(np.arange(1, 31), 'D')
-                fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Future Predictions (30 Days)'))
-
+                future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
+                fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Future Prediction (30 Days)'))
 
                 fig.update_layout(
-                    title=f"{ticker} Stock Price Prediction",
+                    title_text=f"{ticker} Stock Price Prediction",
                     xaxis_title="Date",
                     yaxis_title="Stock Price (IDR)",
-                    template="plotly_dark"
+                    template="plotly_dark",
+                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
+            # More specific error handling
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"An unexpected error occurred: {e}")
+                st.info("This might be a temporary network issue or a problem with the yfinance library. Please try again later.")
 
 if __name__ == "__main__":
     run_stock_predictor_app()
