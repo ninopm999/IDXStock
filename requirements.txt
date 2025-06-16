@@ -1,8 +1,8 @@
-txt
+python==3.11
 streamlit
 yfinance
 numpy
 pandas
+scikit-learn
 tensorflow
 plotly
-scikit-learn
