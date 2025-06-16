@@ -6,6 +6,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import plotly.graph_objects as go
+import requests_cache
 
 def create_dataset(dataset, time_step=1):
     """
@@ -63,16 +64,19 @@ def run_stock_predictor_app():
 
         with st.spinner(f"Fetching data and training model for {ticker}..."):
             try:
-                # --- Data Fetching (Robust Method) ---
-                ticker_obj = yf.Ticker(ticker)
-                # The history() method can be more reliable than yf.download()
+                # --- Data Fetching (Most Robust Method) ---
+                # Use a cached session to avoid repeated requests and add a browser user-agent header
+                session = requests_cache.CachedSession('yfinance.cache')
+                session.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                
+                ticker_obj = yf.Ticker(ticker, session=session)
                 data = ticker_obj.history(start=start_date, end=end_date)
                 
                 if data.empty:
                     st.error(f"No data found for '{ticker}'. This could be due to a few reasons:\n\n"
                              "1. The ticker symbol does not exist.\n"
                              "2. The company was not listed during the selected date range.\n"
-                             "3. There is a temporary issue with the data provider (Yahoo Finance).\n\n"
+                             "3. Yahoo Finance's API is temporarily blocking requests. Please try again in a few minutes.\n\n"
                              "Please double-check the ticker symbol and the date range.")
                     return
 
@@ -90,6 +94,10 @@ def run_stock_predictor_app():
                 time_step = 100
                 X_train, y_train = create_dataset(train_data, time_step)
                 X_test, y_test = create_dataset(test_data, time_step)
+
+                if len(X_train) == 0 or len(X_test) == 0:
+                    st.warning("Not enough data to train the model for the selected date range. Please select a wider date range (e.g., several years).")
+                    return
 
                 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
                 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
@@ -167,7 +175,7 @@ def run_stock_predictor_app():
 
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
-                st.info("This might be a temporary network issue or a problem with the yfinance library. Please try again later.")
+                st.info("This could be a temporary network issue. Please try again in a few minutes.")
 
 if __name__ == "__main__":
     run_stock_predictor_app()
