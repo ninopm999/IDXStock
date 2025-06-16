@@ -47,6 +47,12 @@ def fetch_finnhub_data(ticker, api_key, start_date, end_date):
         
         return df[['Open', 'High', 'Low', 'Close', 'Volume']]
 
+    except requests.exceptions.HTTPError as http_err:
+        if response.status_code == 401:
+            st.error("API Key tidak valid. Silakan periksa kembali API Key Finnhub Anda.")
+        else:
+            st.error(f"HTTP error occurred: {http_err} - {response.text}")
+        return None
     except requests.exceptions.RequestException as e:
         st.error(f"Network error while fetching data: {e}")
         return None
@@ -86,7 +92,7 @@ def run_stock_predictor_app():
         "untuk menggunakan aplikasi ini."
     )
     
-    api_key = st.sidebar.text_input("Enter Your Finnhub API Key", type="password", value="YOUR_API_KEY_HERE")
+    api_key = st.sidebar.text_input("Enter Your Finnhub API Key", type="password")
     
     st.sidebar.markdown(
         "**Contoh Kode Saham (harus diakhiri `.JK`):**\n\n"
@@ -105,13 +111,12 @@ def run_stock_predictor_app():
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
-        # --- FIX: Validate that the end date is not in the future ---
+        if not api_key:
+            st.error("Harap masukkan API Key Finnhub Anda di sidebar.")
+            return
+            
         if end_date >= date.today():
             st.error("Tanggal Akhir ('End Date') tidak boleh hari ini atau di masa depan. Silakan pilih tanggal kemarin atau sebelumnya.")
-            return
-
-        if api_key == "YOUR_API_KEY_HERE" or not api_key:
-            st.error("Harap masukkan API Key Finnhub Anda di sidebar.")
             return
 
         with st.spinner(f"Fetching data for {ticker} and training model..."):
@@ -119,11 +124,7 @@ def run_stock_predictor_app():
             data = fetch_finnhub_data(ticker, api_key, start_date, end_date)
             
             if data is None or data.empty:
-                st.error(f"Tidak ada data yang ditemukan untuk '{ticker}'. Kemungkinan penyebab:\n\n"
-                         "1. **API Key tidak valid.**\n"
-                         "2. **Kode saham salah.**\n"
-                         "3. **Tidak ada data pada rentang tanggal yang dipilih.**\n\n"
-                         "Mohon periksa kembali input Anda.")
+                st.warning(f"Gagal mengambil data untuk '{ticker}'. Mohon periksa kembali input Anda (API Key, kode saham, dan rentang tanggal).")
                 return
 
             st.subheader(f"Historical Data for {ticker}")
@@ -141,7 +142,7 @@ def run_stock_predictor_app():
             X_train, y_train = create_dataset(train_data, time_step)
             X_test, y_test = create_dataset(test_data, time_step)
 
-            if len(X_train) == 0 or len(X_test) == 0:
+            if len(X_train) < 10 or len(X_test) < 1: # Check for minimum data points
                 st.warning("Data tidak cukup untuk melatih model. Harap pilih rentang tanggal yang lebih panjang (misalnya, beberapa tahun).")
                 return
 
@@ -149,14 +150,15 @@ def run_stock_predictor_app():
             X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
             # --- LSTM Model ---
-            model = Sequential([
-                LSTM(50, return_sequences=True, input_shape=(time_step, 1)), Dropout(0.2),
-                LSTM(50, return_sequences=True), Dropout(0.2),
-                LSTM(50), Dropout(0.2),
-                Dense(1)
-            ])
-            model.compile(optimizer='adam', loss='mean_squared_error')
-            model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=64, verbose=0)
+            with st.spinner('Training the LSTM model... This might take a moment.'):
+                model = Sequential([
+                    LSTM(50, return_sequences=True, input_shape=(time_step, 1)), Dropout(0.2),
+                    LSTM(50, return_sequences=True), Dropout(0.2),
+                    LSTM(50), Dropout(0.2),
+                    Dense(1)
+                ])
+                model.compile(optimizer='adam', loss='mean_squared_error')
+                model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50, batch_size=64, verbose=0)
 
             # --- Predictions ---
             train_predict = model.predict(X_train)
@@ -192,23 +194,20 @@ def run_stock_predictor_app():
             st.subheader("Hasil Prediksi Harga Saham")
             fig = go.Figure()
 
-            # Plot Actual Price
             fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Harga Aktual'))
 
-            # Plot Training Predictions
             train_predict_plot = np.empty_like(scaled_prices)
             train_predict_plot[:, :] = np.nan
             train_predict_plot[time_step:len(train_predict) + time_step, :] = train_predict
             fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Prediksi Training'))
 
-            # Plot Test Predictions (More Robust Method)
             test_predict_plot = np.empty_like(scaled_prices)
             test_predict_plot[:, :] = np.nan
             test_start_index = len(train_predict) + (time_step*2) + 1
-            test_predict_plot[test_start_index:test_start_index + len(test_predict), :] = test_predict
+            if test_start_index + len(test_predict) <= len(test_predict_plot):
+                test_predict_plot[test_start_index:test_start_index + len(test_predict), :] = test_predict
             fig.add_trace(go.Scatter(x=data.index, y=test_predict_plot.flatten(), mode='lines', name='Prediksi Test'))
             
-            # Plot Future Predictions
             future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
             fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Prediksi 30 Hari ke Depan'))
 
