@@ -19,14 +19,25 @@ def run_stock_predictor_app():
     st.set_page_config(page_title="IDX Stock Price Predictor", layout="wide")
     st.title("🇮🇩 IDX Stock Price Predictor (via investpy)")
     st.markdown("""
-    This application uses an LSTM neural network to predict stock prices on the Indonesia Stock Exchange (IDX), powered by data from [Investing.com](https://www.investing.com).
+    This application uses an LSTM neural network to predict stock prices on the Indonesia Stock Exchange (IDX), powered by data from Investing.com.
     """)
 
     st.sidebar.header("User Input")
-    stock_list = investpy.get_stocks(country='indonesia')
-    stock_names = stock_list['name'].sort_values().tolist()
 
-    selected_stock = st.sidebar.selectbox("Select a stock:", stock_names, index=stock_names.index("Bank Central Asia"))
+    # Get all available stocks from Indonesia
+    try:
+        stock_list = investpy.get_stocks(country='indonesia')
+    except Exception as e:
+        st.error(f"Gagal mengambil daftar saham dari Investing.com: {e}")
+        return
+
+    # Display as "Company Name (Symbol)"
+    stock_options = [f"{row['name']} ({row['symbol']})" for _, row in stock_list.iterrows()]
+    selected_option = st.sidebar.selectbox("Select a stock:", sorted(stock_options))
+
+    # Extract valid name only
+    selected_stock = selected_option.split(" (")[0]
+
     start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
     end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
     predict_button = st.sidebar.button("Predict Stock Price")
