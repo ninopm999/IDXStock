@@ -41,7 +41,6 @@ def run_stock_predictor_app():
     # --- User Input ---
     st.sidebar.header("User Input")
     
-    # Add informational box for ticker format
     st.sidebar.info(
         "Enter an official IDX ticker symbol. "
         "**It must end with `.JK`**.\n\n"
@@ -58,17 +57,17 @@ def run_stock_predictor_app():
     predict_button = st.sidebar.button("Predict Stock Price")
 
     if predict_button:
-        # Pre-emptive check for correct ticker format
         if not ticker.endswith('.JK'):
             st.error("Invalid Ticker. The ticker symbol must end with '.JK' for the Indonesia Stock Exchange.")
             return
 
         with st.spinner(f"Fetching data and training model for {ticker}..."):
             try:
-                # --- Data Fetching ---
-                data = yf.download(ticker, start=start_date, end=end_date)
+                # --- Data Fetching (Robust Method) ---
+                ticker_obj = yf.Ticker(ticker)
+                # The history() method can be more reliable than yf.download()
+                data = ticker_obj.history(start=start_date, end=end_date)
                 
-                # Check if data is empty AFTER download attempt
                 if data.empty:
                     st.error(f"No data found for '{ticker}'. This could be due to a few reasons:\n\n"
                              "1. The ticker symbol does not exist.\n"
@@ -92,7 +91,6 @@ def run_stock_predictor_app():
                 X_train, y_train = create_dataset(train_data, time_step)
                 X_test, y_test = create_dataset(test_data, time_step)
 
-                # Reshape data for LSTM [samples, time_steps, features]
                 X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
                 X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
@@ -113,7 +111,6 @@ def run_stock_predictor_app():
                 train_predict = model.predict(X_train)
                 test_predict = model.predict(X_test)
 
-                # Invert predictions back to original scale
                 train_predict = scaler.inverse_transform(train_predict)
                 test_predict = scaler.inverse_transform(test_predict)
 
@@ -134,7 +131,7 @@ def run_stock_predictor_app():
                         lst_output.extend(yhat.tolist())
                         i=i+1
                     else:
-                        x_input = x_input.reshape((1, n_steps,1))
+                        x_input = np.array(temp_input).reshape((1, n_steps,1))
                         yhat = model.predict(x_input,verbose=0)
                         temp_input.extend(yhat[0].tolist())
                         lst_output.extend(yhat.tolist())
@@ -146,20 +143,16 @@ def run_stock_predictor_app():
                 st.subheader("Stock Price Prediction Results")
                 fig = go.Figure()
 
-                # Original Closing Price
                 fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Actual Price'))
 
-                # Training Predictions
                 train_predict_plot = np.empty_like(scaled_prices)
                 train_predict_plot[:, :] = np.nan
                 train_predict_plot[time_step:len(train_predict) + time_step, :] = train_predict
                 fig.add_trace(go.Scatter(x=data.index, y=train_predict_plot.flatten(), mode='lines', name='Training Prediction'))
 
-                # Test Predictions
                 test_predict_index = data.index[len(train_data) + time_step + 1 : len(data) -1]
                 fig.add_trace(go.Scatter(x=test_predict_index, y=test_predict.flatten(), mode='lines', name='Test Prediction'))
                 
-                # Future Predictions
                 future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=30)
                 fig.add_trace(go.Scatter(x=future_dates, y=future_predictions.flatten(), mode='lines', name='Future Prediction (30 Days)'))
 
@@ -172,7 +165,6 @@ def run_stock_predictor_app():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            # More specific error handling
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
                 st.info("This might be a temporary network issue or a problem with the yfinance library. Please try again later.")
