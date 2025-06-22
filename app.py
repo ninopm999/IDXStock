@@ -102,7 +102,10 @@ future_features = pd.DataFrame([{
 }])
 
 future_price = model.predict(future_features)[0]
-st.success(f"📈 Predicted Close Price on {future_date.date()}: Rp {future_price:,.2f}")
+last_close = df['Close'].iloc[-1]
+trend_arrow = "📉" if future_price < last_close else "📈"
+
+st.success(f"{trend_arrow} Predicted Close Price on {future_date.date()}: Rp {future_price:,.2f}")
 
 # --- (Optional) Sentiment Note ---
 st.caption("📌 Future enhancement: Integrate sentiment from news or social media APIs like NewsAPI or Twitter.")
