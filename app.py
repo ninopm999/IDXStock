@@ -30,7 +30,7 @@ def load_data(symbol):
 def add_indicators(data):
     close_series = data['Close']
     if isinstance(close_series, pd.DataFrame):
-        close_series = close_series.squeeze()  # ensure it's 1D
+        close_series = close_series.squeeze()
     data['RSI'] = RSIIndicator(close=close_series).rsi()
     data['MACD'] = MACD(close=close_series).macd()
     bb = BollingerBands(close=close_series)
@@ -52,7 +52,7 @@ def train_model(data):
     predictions = model.predict(X_test)
     r2 = r2_score(y_test, predictions)
     mae = mean_absolute_error(y_test, predictions)
-    return model, r2, mae, X_test, y_test, predictions
+    return model, r2, mae, X_test, y_test.reset_index(drop=True), predictions
 
 # --- Load & Process Data ---
 if user_file:
@@ -72,7 +72,7 @@ st.metric("Model R² Accuracy", f"{r2*100:.2f}%")
 st.metric("Mean Absolute Error", f"{mae:.2f} IDR")
 
 # --- Chart Actual vs Predicted ---
-result_df = pd.DataFrame({'Actual': y_test.values, 'Predicted': predictions})
+result_df = pd.DataFrame({'Actual': y_test, 'Predicted': predictions})
 st.line_chart(result_df)
 
 # --- Predict Future ---
