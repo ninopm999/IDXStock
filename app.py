@@ -28,9 +28,12 @@ def load_data(symbol):
 
 # --- Feature Engineering ---
 def add_indicators(data):
-    data['RSI'] = RSIIndicator(close=data['Close']).rsi()
-    data['MACD'] = MACD(close=data['Close']).macd()
-    bb = BollingerBands(close=data['Close'])
+    close_series = data['Close']
+    if isinstance(close_series, pd.DataFrame):
+        close_series = close_series.squeeze()  # ensure it's 1D
+    data['RSI'] = RSIIndicator(close=close_series).rsi()
+    data['MACD'] = MACD(close=close_series).macd()
+    bb = BollingerBands(close=close_series)
     data['BB_High'] = bb.bollinger_hband()
     data['BB_Low'] = bb.bollinger_lband()
     data['Day'] = data['Date'].dt.day
