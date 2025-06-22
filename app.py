@@ -47,16 +47,14 @@ def add_indicators(data):
 def train_model(data):
     features = ['Open', 'High', 'Low', 'Volume', 'RSI', 'MACD', 'BB_High', 'BB_Low', 'Day', 'Month', 'Year']
     X = data[features]
-    y = data['Close']
-    if y.ndim > 1:
-        y = y.squeeze()
+    y = data[['Close']].values.squeeze()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)
     r2 = r2_score(y_test, predictions)
     mae = mean_absolute_error(y_test, predictions)
-    return model, r2, mae, X_test, y_test.reset_index(drop=True), pd.Series(predictions)
+    return model, r2, mae, X_test, y_test, predictions
 
 # --- Load & Process Data ---
 if user_file:
@@ -77,8 +75,8 @@ st.metric("Mean Absolute Error", f"{mae:.2f} IDR")
 
 # --- Chart Actual vs Predicted ---
 result_df = pd.DataFrame({
-    'Actual': y_test.values.squeeze(),
-    'Predicted': predictions.values.squeeze()
+    'Actual': np.array(y_test).squeeze(),
+    'Predicted': np.array(predictions).squeeze()
 })
 st.line_chart(result_df)
 
