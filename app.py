@@ -31,6 +31,8 @@ def add_indicators(data):
     close_series = data['Close']
     if isinstance(close_series, pd.DataFrame):
         close_series = close_series.squeeze()
+    elif isinstance(close_series.values, np.ndarray) and close_series.values.ndim == 2:
+        close_series = close_series.values.squeeze()
     data['RSI'] = RSIIndicator(close=close_series).rsi()
     data['MACD'] = MACD(close=close_series).macd()
     bb = BollingerBands(close=close_series)
@@ -46,13 +48,15 @@ def train_model(data):
     features = ['Open', 'High', 'Low', 'Volume', 'RSI', 'MACD', 'BB_High', 'BB_Low', 'Day', 'Month', 'Year']
     X = data[features]
     y = data['Close']
+    if y.ndim > 1:
+        y = y.squeeze()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)
     r2 = r2_score(y_test, predictions)
     mae = mean_absolute_error(y_test, predictions)
-    return model, r2, mae, X_test, y_test.reset_index(drop=True), predictions
+    return model, r2, mae, X_test, y_test.reset_index(drop=True), pd.Series(predictions)
 
 # --- Load & Process Data ---
 if user_file:
@@ -72,7 +76,10 @@ st.metric("Model R² Accuracy", f"{r2*100:.2f}%")
 st.metric("Mean Absolute Error", f"{mae:.2f} IDR")
 
 # --- Chart Actual vs Predicted ---
-result_df = pd.DataFrame({'Actual': y_test, 'Predicted': predictions})
+result_df = pd.DataFrame({
+    'Actual': y_test.values.squeeze(),
+    'Predicted': predictions.values.squeeze()
+})
 st.line_chart(result_df)
 
 # --- Predict Future ---
